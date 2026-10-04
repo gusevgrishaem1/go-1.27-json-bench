@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 2s
+scrape_configs:
+  - job_name: go127-v1
+    static_configs: [{ targets: ["go127-v1:8080"] }]
+  - job_name: go127-v1-nojsonv2
+    static_configs: [{ targets: ["go127-v1-nojsonv2:8080"] }]
+  - job_name: go127-v2
+    static_configs: [{ targets: ["go127-v2:8080"] }]

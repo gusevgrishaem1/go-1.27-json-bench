@@ -1,0 +1,66 @@
+{
+    "title":  "Go 1.27 JSON: v1 API / v1 engine / v2 API",
+    "uid":  "go-json-v1-v2",
+    "schemaVersion":  39,
+    "version":  5,
+    "refresh":  "5s",
+    "description":  "Сравнение трех сервисов: go127-v1 (encoding/json на движке v2 с настройками совместимости), go127-v1-nojsonv2 (encoding/json на старом движке), go127-v2 (прямой encoding/json/v2). Чтобы сравнить именно движки, сопоставляйте go127-v1-nojsonv2 и go127-v1.",
+    "panels":  [
+                   {
+                       "type":  "timeseries",
+                       "id":  3,
+                       "title":  "JSON decode time / request",
+                       "description":  "Среднее время decodeJSON на успешный запрос отдельно для каждого из трех сервисов.",
+                       "gridPos":  {
+                                       "h":  8,
+                                       "w":  12,
+                                       "x":  0,
+                                       "y":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "expr":  "rate(json_decode_duration_seconds_sum[30s]) / rate(json_requests_total[30s])",
+                                           "legendFormat":  "{{job}}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "s"
+                                                        }
+                                       },
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "go-json-prometheus"
+                                      }
+                   },
+                   {
+                       "type":  "timeseries",
+                       "id":  4,
+                       "title":  "JSON encode time / request",
+                       "description":  "Среднее время encodeJSON на успешный запрос отдельно для каждого из трех сервисов.",
+                       "gridPos":  {
+                                       "h":  8,
+                                       "w":  12,
+                                       "x":  12,
+                                       "y":  0
+                                   },
+                       "targets":  [
+                                       {
+                                           "expr":  "rate(json_encode_duration_seconds_sum[30s]) / rate(json_requests_total[30s])",
+                                           "legendFormat":  "{{job}}",
+                                           "refId":  "A"
+                                       }
+                                   ],
+                       "fieldConfig":  {
+                                           "defaults":  {
+                                                            "unit":  "s"
+                                                        }
+                                       },
+                       "datasource":  {
+                                          "type":  "prometheus",
+                                          "uid":  "go-json-prometheus"
+                                      }
+                   }
+               ]
+}

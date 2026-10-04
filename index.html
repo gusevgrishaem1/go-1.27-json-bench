@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Зачем появился JSON v2 — и что изменилось внутри</title>
+  <style>
+    :root { color-scheme: light; --ink:#17212b; --muted:#526170; --paper:#f4f6f8; --card:#fff; --line:#d8e0e7; --accent:#087e8b; --soft:#e3f4f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    header, main, footer { width:min(1100px,calc(100% - 36px)); margin-inline:auto; }
+    header { padding:42px 0 18px; }
+    h1 { margin:6px 0 10px; font-size:clamp(2rem,5vw,3.2rem); line-height:1.1; }
+    h2 { margin:0; font-size:clamp(1.4rem,3vw,2rem); line-height:1.2; }
+    h3 { margin:1.15em 0 .35em; }
+    p { margin:.65em 0; }
+    .eyebrow,.muted { color:var(--muted); }
+    .subtitle { max-width:850px; font-size:1.1rem; color:var(--muted); }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-top:18px; }
+    button { border:1px solid var(--line); border-radius:8px; padding:8px 13px; background:var(--card); color:var(--ink); font:inherit; cursor:pointer; }
+    .language-switch { display:inline-flex; gap:6px; margin-left:auto; }
+    .language-switch button[aria-pressed="true"] { background:var(--accent); color:white; border-color:var(--accent); }
+    #position { color:var(--muted); font-size:.9rem; }
+    main { padding-bottom:38px; }
+    .slide { margin:18px 0; padding:clamp(22px,4vw,40px); background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:0 7px 22px #23384d0b; }
+    .slide-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; border-bottom:1px solid var(--line); padding-bottom:16px; margin-bottom:20px; }
+    .cols { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .graph-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:20px; }
+    .box { padding:14px 17px; background:#f7f9fa; border:1px solid var(--line); border-radius:11px; }
+    .box h3 { margin-top:0; }
+    .key { border-left:4px solid var(--accent); padding:11px 15px; margin:16px 0; background:var(--soft); border-radius:0 8px 8px 0; }
+    pre { overflow:auto; padding:14px 16px; background:#101923; color:#e8f0f6; border-radius:10px; font:13px/1.5 ui-monospace,Consolas,monospace; }
+    code { font:.92em ui-monospace,Consolas,monospace; }
+    .chart-slot { min-height:0; display:block; padding:0; text-align:left; background:#101318; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .chart-slot img { display:block; width:100%; height:auto; max-width:none; max-height:none; object-fit:contain; }
+    .chart-hint { margin:0; padding:24px; color:var(--muted); font-size:.9rem; }
+    figure { margin:0; min-width:0; }
+    figcaption { margin-top:8px; color:var(--ink); font-size:.94rem; } .chart-description { margin:.25em 0 0; color:var(--muted); }
+    .table-scroll { overflow-x:auto; } table { width:100%; border-collapse:collapse; font-size:.9rem; } th,td { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; } th { background:var(--soft); } td:nth-child(n+3) { white-space:nowrap; font-variant-numeric:tabular-nums; }
+    a { color:#087e8b; }
+    footer { padding:8px 0 32px; color:var(--muted); font-size:.9rem; }
+    .architecture { width:100%; height:auto; }
+    .deck-mode main { width:min(1180px,calc(100% - 28px)); }
+    .deck-mode .slide { display:none; min-height:70vh; }
+    .deck-mode .slide.active { display:block; }
+    @media(max-width:850px) { .graph-grid { grid-template-columns:1fr; } .chart-slot { min-height:0; } }
+    @media(max-width:680px) { .cols { grid-template-columns:1fr; } .slide-head { display:block; } }
+    @media print { body { background:white; } header .toolbar { display:none; } .slide { box-shadow:none; break-inside:avoid; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">Go · encoding/json · JSON v2</div>
+    <h1>Зачем появился JSON v2 — и что изменилось внутри</h1>
+    <p class="subtitle">Почему Go развивает новый JSON API, что показали измерения этого стенда и как устройство реализации помогает понять результаты.</p>
+    <div class="toolbar">
+      <button id="deckToggle">Режим слайдов</button><button id="prev" hidden>← Назад</button><button id="next" hidden>Дальше →</button><span id="position"></span><span class="language-switch" role="group" aria-label="Language / Язык"><button id="langRu" lang="ru" aria-pressed="true">RU</button><button id="langEn" lang="en" aria-pressed="false">EN</button></span>
+    </div>
+  </header>
+  <main>
+    <section class="slide" id="s1">
+      <div class="slide-head"><h2>1. О чём этот доклад</h2></div>
+      <p>JSON v2 — новый major API для кодирования Go-значений в JSON и декодирования JSON в Go-значения. Параллельно развивается низкоуровневый пакет <code>encoding/json/jsontext</code>, который работает с JSON-синтаксисом.</p>
+      <p>Разберём причины появления v2, его API и архитектуру, затем сравним три реализации на одном стенде и посмотрим, какие внутренние механизмы могут объяснить измерения.</p>
+    </section>
+
+    <section class="slide" id="s2">
+      <div class="slide-head"><h2>2. Почему нельзя было просто поправить v1</h2></div>
+      <p>Некоторые ограничения <code>encoding/json</code> связаны с давними правилами поведения и формой API. Исправление таких правил в существующем пакете могло бы нарушить совместимость Go.</p>
+      <div class="cols">
+        <div class="box"><h3>Неоднозначное поведение</h3><ul>
+          <li>v1 принимает некорректный UTF-8 и заменяет его при обработке.</li>
+          <li>Повторяющиеся имена полей JSON-объекта могут по-разному трактоваться разными программами.</li>
+          <li>Сопоставление имён полей без учёта регистра и кодирование nil map/slice могут неожиданно менять смысл данных.</li>
+        </ul></div>
+        <div class="box"><h3>Ограничения API</h3><ul>
+          <li>Параметры <code>Encoder</code> и <code>Decoder</code> нельзя удобно передать во все функции и пользовательские методы.</li>
+          <li><code>MarshalJSON</code> возвращает отдельный <code>[]byte</code>, который библиотеке нужно проверить и при необходимости отформатировать.</li>
+          <li><code>UnmarshalJSON</code> получает целое значение: границы сначала нужно найти, а затем пользовательский метод разбирает значение повторно.</li>
+          <li>Старые <code>Encoder</code>/<code>Decoder</code> буферизуют целое значение; симметричного низкоуровневого API записи токенов нет.</li>
+        </ul></div>
+      </div>
+      <div class="key">Новая major-версия даёт возможность менять API и спорные правила, сохраняя существующее поведение для программ, которые продолжают использовать v1.</div>
+      <p class="muted">Источник: статья Go <a href="https://go.dev/blog/jsonv2-exp">A new experimental Go API for JSON</a>.</p>
+    </section>
+
+    <section class="slide" id="s3">
+      <div class="slide-head"><h2>3. Что v2 улучшает: API и архитектура</h2></div>
+      <div class="cols">
+        <div class="box"><h3>API и потоковая обработка</h3><ul>
+          <li>Значения <code>Options</code> доступны функциям и передаются через цепочку вызовов.</li>
+          <li>Есть функции для байтовых срезов, <code>io.Reader</code>/<code>io.Writer</code> и <code>jsontext.Encoder</code>/<code>Decoder</code>.</li>
+          <li><code>MarshalerTo</code> и <code>UnmarshalerFrom</code> позволяют пользовательскому типу читать или писать через общий поток.</li>
+        </ul><pre>Marshal / Unmarshal          []byte
+MarshalWrite / UnmarshalRead io.Writer / io.Reader
+MarshalEncode / UnmarshalDecode
+                             jsontext.Encoder / Decoder</pre></div>
+        <div class="box"><h3>Задачи пакетов</h3><p><code>encoding/json/v2</code> связывает JSON с Go-типами: учитывает поля структур, типы и пользовательские методы. <code>encoding/json/jsontext</code> отвечает за грамматику JSON, значения и токены.</p><p>Стриминговые методы могут избежать промежуточного JSON-среза. Обычные <code>Marshal</code>/<code>Unmarshal</code> всё ещё возвращают или принимают байтовые срезы, поэтому выигрыш зависит от выбранного API и данных.</p></div>
+      </div>
+      <figure><img class="architecture" src="https://go.dev/blog/jsonv2-exp/api.png" alt="Официальная схема разделения семантики encoding/json/v2 и синтаксиса encoding/json/jsontext"><figcaption>Схема разделения синтаксиса и семантики из официальной статьи Go: нижний слой обрабатывает JSON-токены и значения, верхний сопоставляет их с Go-типами.</figcaption></figure>
+      <p class="muted">Источник: <a href="https://go.dev/blog/jsonv2-exp">A new experimental Go API for JSON</a>.</p>
+    </section>
+
+    <section class="slide" id="s4">
+      <div class="slide-head"><h2>4. Как проводилось сравнение</h2></div>
+      <div class="cols">
+        <div class="box"><h3>Три варианта</h3><ul>
+          <li><code>go127-v1-nojsonv2</code>: API <code>encoding/json</code>, сборка с <code>GOEXPERIMENT=nojsonv2</code>.</li>
+          <li><code>go127-v1</code>: тот же API v1 поверх нового движка, с правилами совместимости.</li>
+          <li><code>go127-v2</code>: прямой API <code>encoding/json/v2</code>.</li>
+        </ul><p>Первые два варианта помогают сравнить движки при одном API; сравнение v1 и v2 включает и различия API с настройками.</p></div>
+      </div>
+      <p>Decode замеряется после чтения HTTP-тела; encode охватывает вызов Marshal. Это измерения JSON-операций внутри сервиса, а не полной HTTP-задержки.</p>
+      <div class="key">Память оценивается по <code>B/op</code> и <code>allocs/op</code> микробенчмарков: это выделенные байты и число выделений на операцию, а не размер живой кучи или RSS. Глобальные счётчики runtime под конкурентной HTTP-нагрузкой для оценки памяти не используются.</div>
+      <h3>Условия микробенчмарков</h3>
+      <p>Intel Core i5-12400F, Linux amd64, суффикс тестов <code>-12</code>. Запуск: <code>make bench BENCHTIME=2s COUNT=5</code>. Маленькие объекты содержат 1 элемент, большие — 1000; используются строки, числа, срезы и <code>map[string]any</code>. Encode сериализует Response, decode заполняет новую Request на каждой итерации. Подготовка данных, HTTP и сбор метрик исключены из замера.</p>
+      <p class="muted">Среда запуска: <code>go version go1.27.1 linux/amd64</code>. Версия и параметры сохранены в <code>benchmark-results/environment.txt</code>. Настройки v1 и v2 различаются, включая порядок ключей map.</p>
+    </section>
+
+    <section class="slide" id="s5">
+      <div class="slide-head"><h2>5. Результаты encode</h2></div>
+      <p>Линии: зелёная — прежний движок (go127-v1-nojsonv2), жёлтая — API v1 на новом движке (go127-v1), синяя — прямой API v2 (go127-v2). Каждый график ниже показывает среднее значение на успешный запрос за выбранный интервал.</p>
+      <div class="graph-grid">
+        <figure><div class="chart-slot"><img src="charts/encode-duration.png" alt="Encode: длительность на запрос" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><p class="chart-hint" hidden>Добавьте изображение <code>charts/encode-duration.png</code></p></div><figcaption>Время encode · μs на запрос<p class="chart-description">Среднее время вызова encodeJSON. На показанном интервале прежний движок занимает примерно 620–720 μs на запрос, API v1 на новом движке — 930–1060 μs, прямой v2 — 790–920 μs. Прежний движок быстрее на всём интервале; прямой v2 занимает промежуточное положение. Пики у трёх серий возникают примерно одновременно.</p></figcaption></figure>
+      </div>
+      <p>Сопоставьте сначала старый движок с v1 API на новом движке, затем сравните оба варианта с прямым API v2. График показывает время под HTTP-нагрузкой; таблица микробенчмарков ниже отдельно показывает время и выделения памяти.</p>
+      <h3>Микробенчмарки encode</h3><div class="table-scroll"><table><thead><tr><th>Структура</th><th>Вариант</th><th>ns/op</th><th>B/op</th><th>allocs/op</th></tr></thead><tbody><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v1-nojsonv2</code></td><td>1228</td><td>624</td><td>11</td></tr><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v1</code></td><td>1778</td><td>528</td><td>13</td></tr><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v2</code></td><td>1626</td><td>463</td><td>9</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v1-nojsonv2</code></td><td>1082005</td><td>519943</td><td>9002</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v1</code></td><td>1506946</td><td>384902</td><td>10004</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v2</code></td><td>1392339</td><td>318672</td><td>6003</td></tr></tbody></table></div><p class="muted">Медиана пяти повторов каждого показателя, 2 секунды на случай. Меньше — лучше.</p><p>Время encode у старого движка примерно на 24% меньше, чем у прямого v2, для маленьких объектов и на 22% — для больших объектов. При этом v2 выделяет примерно на 26% и 39% меньше байтов соответственно. Прямой v2 также быстрее совместимого v1 примерно на 9% для маленьких объектов и на 8% для больших объектов. У совместимого v1 меньше выделенных байтов, чем у старого движка, но больше отдельных аллокаций. Скорость и память здесь дают разные результаты.</p>
+    </section>
+
+    <section class="slide" id="s6">
+      <div class="slide-head"><h2>6. Результаты decode</h2></div>
+      <p>Для decode используются те же три реализации и цветовая легенда: зелёная — прежний движок, жёлтая — API v1 на новом движке, синяя — прямой v2. На этом HTTP-запуске прямой v2 показывает меньшую длительность decode; результаты относятся к данному payload и нагрузке.</p>
+      <div class="graph-grid">
+        <figure><div class="chart-slot"><img src="charts/decode-duration.png" alt="Decode: длительность на запрос" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><p class="chart-hint" hidden>Добавьте изображение <code>charts/decode-duration.png</code></p></div><figcaption>Время decode · мс на запрос<p class="chart-description">Среднее время вызова decodeJSON. Прямой v2 занимает примерно 0,96–1,10 мс на запрос, API v1 на новом движке — 1,27–1,46 мс, прежний движок — 1,42–1,61 мс. Прямой v2 быстрее на всём показанном интервале, совместимый v1 располагается между ним и прежним движком. График показывает средние длительности операций под нагрузкой, а не перцентили HTTP-задержки.</p></figcaption></figure>
+      </div>
+      <p>Время под HTTP-нагрузкой и время микробенчмарка относятся к разным условиям. Выделения памяти сравниваются только по таблице ниже.</p>
+      <h3>Микробенчмарки decode</h3><div class="table-scroll"><table><thead><tr><th>Структура</th><th>Вариант</th><th>ns/op</th><th>B/op</th><th>allocs/op</th></tr></thead><tbody><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v1-nojsonv2</code></td><td>3690</td><td>1136</td><td>32</td></tr><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v1</code></td><td>2638</td><td>752</td><td>19</td></tr><tr><td>Маленькие объекты · 1 элемент</td><td><code>go127-v2</code></td><td>2098</td><td>696</td><td>13</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v1-nojsonv2</code></td><td>3095086</td><td>858359</td><td>24009</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v1</code></td><td>2327760</td><td>810718</td><td>18028</td></tr><tr><td>Большие объекты · 1000 элементов</td><td><code>go127-v2</code></td><td>1915927</td><td>762726</td><td>13027</td></tr></tbody></table></div><p class="muted">Медиана пяти повторов каждого показателя, 2 секунды на случай. Меньше — лучше.</p><p>Прямой v2 сокращает время decode относительно старого движка примерно на 43% для маленьких объектов и на 38% для больших объектов. Выделенные байты уменьшаются примерно на 39% и 11%, число аллокаций — на 59% и 46%. Относительно совместимого v1 прямой v2 сокращает время примерно на 20% для маленьких объектов и на 18% для больших объектов. Совместимый v1 также быстрее старого движка, но прямой v2 показывает лучшие значения всех трёх показателей.</p>
+    </section>
+
+
+    <section class="slide" id="s7">
+      <div class="slide-head"><h2>7. Внутри Marshal</h2></div>
+      <div class="cols">
+        <div class="box"><h3>Прежний движок v1 · <code>encode.go</code></h3><pre>e := newEncodeState()
+defer encodeStatePool.Put(e)
+err := e.marshal(v, encOpts{escapeHTML: true})
+if err != nil {
+    return nil, err
+}
+buf := append([]byte(nil), e.Bytes()...)
+return buf, nil</pre><p><code>encodeState</code> содержит <code>bytes.Buffer</code>; отражение Go-типов записывает в него результат. Перед возвратом буфер копируется в новый byte slice.</p></div>
+        <div class="box"><h3>Движок v2 · <code>v2/arshal.go</code></h3><pre>enc := export.GetBufferedEncoder(opts...)
+defer export.PutBufferedEncoder(enc)
+xe := export.Encoder(enc)
+err = marshalEncode(enc, in, &amp;xe.Struct)
+return bytes.Clone(xe.Buf), err</pre><p><code>marshalEncode</code> получает обработчик Go-типа; буферизованный encoder управляет синтаксисом и результатом кодирования.</p></div>
+      </div>
+      <p>Вызов <code>Marshal</code> возвращает <code>[]byte</code> в обоих случаях. Для пользовательского типа интерфейс <code>MarshalJSONTo(*jsontext.Encoder)</code> позволяет записывать вложенные части непосредственно в общий поток вместо создания отдельного JSON-среза.</p>
+    </section>
+
+    <section class="slide" id="s8">
+      <div class="slide-head"><h2>8. Внутри Unmarshal</h2></div>
+      <div class="cols">
+        <div class="box"><h3>Прежний движок v1 · <code>decode.go</code></h3><pre>var d decodeState
+err := checkValid(data, &amp;d.scan)
+if err != nil { return err }
+d.init(data)
+return d.unmarshal(v)</pre><p>Комментарий исходника поясняет порядок: сначала проверить корректность JSON, чтобы не заполнить часть структуры до обнаружения синтаксической ошибки; затем декодировать.</p></div>
+        <div class="box"><h3>Движок v2 · <code>v2/arshal.go</code></h3><pre>dec := export.GetBufferedDecoder(in, opts...)
+defer export.PutBufferedDecoder(dec)
+xd := export.Decoder(dec)
+err = unmarshalDecode(dec, out, &amp;xd.Struct, true)
+return err</pre><p><code>unmarshalDecode</code> получает обработчик Go-типа и читает JSON через decoder пакета <code>jsontext</code>.</p></div>
+      </div>
+      <p>Для каждого типа v2 сохраняет обработчики чтения и записи в <code>lookupArshalerCache</code>. У v1 тоже есть кэш метаданных полей структуры, поэтому разница не в том, что v1 ничего не кэширует: v2 заранее связывает функции обработки типа и его полей, а при повторных вызовах использует подготовленный обработчик.</p>
+      <div class="cols">
+        <div class="box"><h3>Кэш обработчиков · v2/arshal.go</h3><pre>if v, ok := lookupArshalerCache.Load(t); ok {
+    return v.(*arshaler)
+}
+fncs := makeDefaultArshaler(t)
+fncs = makeMethodArshaler(fncs, t)
+fncs = makeTimeArshaler(fncs, t)
+v, _ := lookupArshalerCache.LoadOrStore(t, fncs)
+return v.(*arshaler)</pre><p>После первого построения структура делегирует значения полей уже подготовленным функциям.</p></div>
+        <div class="box"><h3>Повторяющиеся строки в map[string]any</h3>
+          <p>Внутреннее состояние <code>jsontext.Decoder</code> хранит кэш уже созданных Go-строк:</p>
+          <pre>type decoderState struct {
+    state
+    decodeBuffer
+    jsonopts.Struct
+
+    StringCache *[256]string
+}
+
+type stringCache = [256]string</pre>
+          <p><code>state</code> хранит состояние разбора JSON, <code>decodeBuffer</code> — входные байты и позицию чтения, <code>jsonopts.Struct</code> — настройки. <code>StringCache</code> указывает на 256 ячеек с Go-строками; кэш используется при Unmarshal.</p>
+          <pre>case '"':
+    val = jsonwire.UnquoteMayCopy(val, flags.IsVerbatim())
+    if xd.StringCache == nil {
+        xd.StringCache = new(stringCache)
+    }
+    return makeString(xd.StringCache, val), nil</pre>
+          <p>При первом использовании кэш создаётся лениво. <code>makeString</code> выбирает ячейку по хэшу байтов: если строка совпадает, возвращает уже сохранённую; иначе создаёт новую Go-строку и заменяет содержимое ячейки. Кэшируются строки длиной от 2 до 256 байт.</p>
+          <p>В нашем payload значение <code>"demo"</code> повторяется в <code>map[string]any</code>. При попадании в кэш следующие повторы используют те же байты Go-строки, сокращая копирование и аллокации. Map и slice результата создаются отдельно; коллизия хэшей может вытеснить строку из кэша.</p>
+          <p class="muted">Исходники: <a href="https://go.dev/src/encoding/json/jsontext/decode.go">decoderState</a>, <a href="https://go.dev/src/encoding/json/v2/intern.go">stringCache и makeString</a>.</p>
+        </div>
+      </div>
+      <p>Буферизованный decoder также возвращается в пул после вызова. Это может сократить временные выделения при повторных запросах, но исходники сами по себе не доказывают вклад каждого механизма в измеренную скорость. Старый <code>decodeState</code> локален, а полезные map, slice и значения результата нужно создать в любом случае. В этом стенде строка <code>"category":"demo"</code> повторяется, поэтому кэш строк применим; на payload без повторов эффект может быть меньше.</p>
+      <p>В новых пользовательских типах <code>UnmarshalerFrom(*jsontext.Decoder)</code> может читать вложенные данные из того же потока, не получая сначала отдельный срез с полным JSON-значением.</p>
+      <div class="key">Публичный <code>encoding/json.Unmarshal</code> в конфигурации v2 делегирует в <code>jsonv2.Unmarshal(data, v, DefaultOptionsV1())</code> — это видно в <code>v2_decode.go</code>. Для сравнения с прежней реализацией стенд отдельно собирает v1 без jsonv2.</div>
+    </section>
+
+<section class="slide" id="s9">
+      <div class="slide-head"><h2>9. Как jsontext записывает и читает JSON</h2></div>
+      <p><code>jsontext</code> отвечает за грамматику JSON: порядок токенов, разделители, строки, числа и границы значений. Он не решает, что поле <code>"name"</code> соответствует конкретному полю Go-структуры; этим занимается <code>encoding/json/v2</code>.</p>
+      <div class="cols">
+        <div class="box"><h3>Запись: Encoder</h3><ol>
+          <li>Создаём <code>jsontext.Encoder</code> над <code>io.Writer</code>.</li>
+          <li>Передаём токены по одному: начало объекта, имя поля, значение, конец объекта.</li>
+          <li>Encoder хранит состояние вложенности и проверяет, допустим ли следующий токен здесь: например, после имени поля должно идти значение.</li>
+          <li>Он формирует JSON-текст, экранирует строки и отправляет накопленные байты в writer порциями. В прямом режиме каждый верхнеуровневый JSON-текст завершается переводом строки.</li>
+        </ol><pre>enc := jsontext.NewEncoder(w)
+_ = enc.WriteToken(jsontext.BeginObject)
+_ = enc.WriteToken(jsontext.String("name"))
+_ = enc.WriteToken(jsontext.String("value"))
+_ = enc.WriteToken(jsontext.EndObject)
+// результат: {"name":"value"} и перевод строки
+</pre><p>В реальном коде нужно проверять ошибку каждого вызова. Вложенный массив строится аналогично через <code>BeginArray</code> и <code>EndArray</code>. Вместо серии токенов можно передать готовый синтаксически целый <code>jsontext.Value</code> в <code>WriteValue</code>.</p></div>
+        <div class="box"><h3>Чтение: Decoder</h3><ol>
+          <li>Создаём <code>jsontext.Decoder</code> над <code>io.Reader</code>; вход может поступать частями.</li>
+          <li><code>ReadToken</code> читает следующий токен и обновляет состояние вложенности.</li>
+          <li>Decoder проверяет синтаксис по ходу чтения: кавычки, литералы, запятые, двоеточия и соответствие скобок.</li>
+          <li>Ошибки синтаксиса и чтения возвращаются вызывающему коду; конец потока обозначается <code>io.EOF</code>.</li>
+        </ol><pre>dec := jsontext.NewDecoder(r)
+tok, err := dec.ReadToken() // {
+name, err := dec.ReadToken() // "name"
+value, err := dec.ReadToken() // "value"
+end, err := dec.ReadToken() // }
+_ = tok; _ = name; _ = value; _ = end</pre><p><code>ReadValue</code> вместо одного токена читает следующее полное JSON-значение и возвращает его как байтовый <code>jsontext.Value</code>. Поэтому для объекта целиком можно взять значение сразу, а для выборочного разбора — читать токены постепенно.</p></div>
+      </div>
+      <div class="key"><strong>Связь с v2:</strong> <code>MarshalEncode</code> поручает семантическому обработчику Go-типа записывать значения в <code>jsontext.Encoder</code>; <code>UnmarshalDecode</code> даёт обработчику типа читать их из <code>jsontext.Decoder</code>. Пользовательские методы <code>MarshalJSONTo</code> и <code>UnmarshalJSONFrom</code> используют тот же поток, чтобы обрабатывать вложенные данные без отдельного промежуточного JSON-среза.</div>
+      <p class="muted">В потоковом режиме encoder и decoder используют внутренний буфер для работы с <code>io.Writer</code>/<code>io.Reader</code>. «Потоковый» означает, что API может обрабатывать токены и значения последовательно, а не то, что внутри никогда нет буферизации.</p>
+    </section>
+
+    <section class="slide" id="s10">
+      <div class="slide-head"><h2>10. Откуда берётся разница</h2></div>
+      <p>Сопоставление материалов проекта и исходников указывает на несколько механизмов, но главный для больших входов — лишний проход по байтам в прежнем v1. Прямой v2 разбирает и проверяет JSON по мере чтения. Подготовленные обработчики типов и повторное использование строк и буферов могут дополнительно влиять на подходящих сценариях.</p>
+      <div class="cols">
+        <div class="box"><h3>Старый движок · decode.go</h3><pre>var d decodeState
+err := checkValid(data, &amp;d.scan)
+if err != nil {
+    return err
+}
+d.init(data)
+return d.unmarshal(v)</pre><p>Первый проход нужен старому API, чтобы сообщить о синтаксической ошибке до изменения назначения. После проверки <code>decodeState</code> читает те же байты для заполнения значения.</p></div>
+        <div class="box"><h3>Прямой v2 · v2/arshal.go</h3><pre>unmarshal := lookupArshaler(t).unmarshal
+if err := unmarshal(in, va, uo); err != nil {
+    return err
+}</pre><p>Типовой обработчик вызывает <code>jsontext.Decoder</code>, который проверяет структуру входа по мере чтения токенов и значений. Отдельного полного прохода перед этим нет.</p></div>
+      </div>
+      <div class="key"><strong>Оговорка про v1 facade:</strong> в <code>unmarshalDecode</code> опция <code>ReportErrorsWithLegacySemantics</code> включает <code>CheckNextValue</code> перед обработчиком. Публичный <code>encoding/json.Unmarshal</code> передаёт <code>DefaultOptionsV1</code>, поэтому сохраняет предварительную проверку. В этом стенде старый API на новом движке не получает эффект от пропуска этого прохода; это свойство прямого v2 пути.</div>
+      <p>В релизных материалах Go ускорение относится прежде всего к <code>Unmarshal</code>. Для <code>Marshal</code> заявлена примерно сопоставимая скорость со старой реализацией: там нет такого же отдельного полного прохода, который можно убрать.</p>
+    </section>
+        <section class="slide" id="s11">
+      <div class="slide-head"><h2>11. Итоги</h2></div>
+      <ol>
+        <li>JSON v2 даёт отдельное пространство имён для развития API и правил без нарушения совместимости v1.</li>
+        <li>Пакет <code>jsontext</code> обрабатывает синтаксис, а <code>encoding/json/v2</code> сопоставляет его с Go-типами.</li>
+        <li>Потоковые функции и пользовательские методы могут сократить промежуточные буферы и повторный разбор.</li>
+      </ol>
+      <div class="key"><strong>Главная мысль:</strong> JSON v2 меняет и правила, и форму API, а архитектурное разделение синтаксиса и Go-типов открывает путь к потоковой обработке.</div>
+    </section>
+
+    <section class="slide" id="refs">
+      <div class="slide-head"><h2>Источники</h2></div>
+      <ul>
+        <li><a href="https://go.dev/blog/jsonv2-exp">A new experimental Go API for JSON</a> — мотивация, устройство пакетов и API.</li>
+        <li><a href="https://go.dev/doc/go1.27">Go 1.27 Release Notes</a>.</li>
+        <li>Исходники Go: <a href="https://go.dev/src/encoding/json/encode.go">encode.go</a>, <a href="https://go.dev/src/encoding/json/decode.go">decode.go</a>, <a href="https://go.dev/src/encoding/json/v2/arshal.go">v2/arshal.go</a> и <a href="https://go.dev/src/encoding/json/v2_decode.go">v2_decode.go</a>.</li>
+        <!-- Замените URL ниже ссылкой на репозиторий с сервисами и бенчмарками. -->
+        <li><a href="https://github.com/YOUR_USERNAME/YOUR_REPOSITORY">Код сервисов и бенчмарков для тестирования и сравнения</a>.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>В режиме слайдов используй клавиши ← и → для перехода; Escape возвращает к статье.</footer>
+  <script>
+    (() => {
+      const translations = {"Значения":"Values of","Зачем появился JSON v2 — и что изменилось внутри":"Why JSON v2 was introduced — and what changed under the hood","Почему Go развивает новый JSON API, что показали измерения этого стенда и как устройство реализации помогает понять результаты.":"Why Go is developing a new JSON API, what this lab's measurements show, and how the implementation helps explain the results.","Режим слайдов":"Slide mode","← Назад":"← Back","Дальше →":"Next →","1. О чём этот доклад":"1. What this article covers","JSON v2 — новый major API для кодирования Go-значений в JSON и декодирования JSON в Go-значения. Параллельно развивается низкоуровневый пакет":"JSON v2 is a new major API for encoding Go values as JSON and decoding JSON into Go values. It is being developed alongside the low-level",", который работает с JSON-синтаксисом.":", which handles JSON syntax.","Разберём причины появления v2, его API и архитектуру, затем сравним три реализации на одном стенде и посмотрим, какие внутренние механизмы могут объяснить измерения.":"We will examine why v2 was introduced, its API and architecture, then compare three configurations in the same lab and explore the internal mechanisms that may explain the measurements.","2. Почему нельзя было просто поправить v1":"2. Why v1 could not simply be fixed","Некоторые ограничения":"Some limitations of","связаны с давними правилами поведения и формой API. Исправление таких правил в существующем пакете могло бы нарушить совместимость Go.":"stem from longstanding behavior and the shape of the API. Changing those rules in the existing package could break Go's compatibility guarantees.","Неоднозначное поведение":"Ambiguous behavior","v1 принимает некорректный UTF-8 и заменяет его при обработке.":"v1 accepts invalid UTF-8 and replaces it during processing.","Повторяющиеся имена полей JSON-объекта могут по-разному трактоваться разными программами.":"Different programs may interpret duplicate names in a JSON object differently.","Сопоставление имён полей без учёта регистра и кодирование nil map/slice могут неожиданно менять смысл данных.":"Case-insensitive field matching and the encoding of nil maps and slices may unexpectedly change the meaning of data.","Ограничения API":"API limitations","Параметры":"Options for","и":"and","нельзя удобно передать во все функции и пользовательские методы.":"cannot easily be passed to every function and custom method.","возвращает отдельный":"returns a separate",", который библиотеке нужно проверить и при необходимости отформатировать.":", which the library must validate and format when necessary.","получает целое значение: границы сначала нужно найти, а затем пользовательский метод разбирает значение повторно.":"receives a complete value: its boundaries must be found first, and then the custom method parses it again.","Старые":"The old","буферизуют целое значение; симметричного низкоуровневого API записи токенов нет.":"buffer an entire value; there is no corresponding low-level API for writing tokens.","Новая major-версия даёт возможность менять API и спорные правила, сохраняя существующее поведение для программ, которые продолжают использовать v1.":"A new major version allows the API and disputed rules to evolve while preserving existing behavior for programs that continue to use v1.","Источник: статья Go":"Source: the Go article","3. Что v2 улучшает: API и архитектура":"3. What v2 improves: API and architecture","API и потоковая обработка":"API and streaming","доступны функциям и передаются через цепочку вызовов.":"are available to functions and passed through the call chain.","Есть функции для байтовых срезов,":"There are functions for byte slices,","позволяют пользовательскому типу читать или писать через общий поток.":"allow a custom type to read or write through a shared stream.","Задачи пакетов":"Package responsibilities","связывает JSON с Go-типами: учитывает поля структур, типы и пользовательские методы.":"maps JSON to Go types, handling struct fields, types, and custom methods.","отвечает за грамматику JSON, значения и токены.":"handles JSON grammar, values, and tokens.","Стриминговые методы могут избежать промежуточного JSON-среза. Обычные":"Streaming methods can avoid intermediate JSON slices. The ordinary","всё ещё возвращают или принимают байтовые срезы, поэтому выигрыш зависит от выбранного API и данных.":"still return or accept byte slices, so the benefit depends on the API and data.","Схема разделения синтаксиса и семантики из официальной статьи Go: нижний слой обрабатывает JSON-токены и значения, верхний сопоставляет их с Go-типами.":"The syntax and semantics layers from the official Go article: the lower layer handles JSON tokens and values, while the upper layer maps them to Go types.","Источник:":"Source:","4. Как проводилось сравнение":"4. How the comparison was set up","Три варианта":"Three configurations",", сборка с":", built with",": тот же API v1 поверх нового движка, с правилами совместимости.":": the same v1 API on the new engine, with compatibility rules.",": прямой API":": the direct","Первые два варианта помогают сравнить движки при одном API; сравнение v1 и v2 включает и различия API с настройками.":"The first two configurations help compare engines using the same API; comparing v1 and v2 also includes differences in their APIs and options.","Decode замеряется после чтения HTTP-тела; encode охватывает вызов Marshal. Это измерения JSON-операций внутри сервиса, а не полной HTTP-задержки.":"Decode is measured after the HTTP body is read; encode covers the Marshal call. These measurements describe JSON operations within the service, rather than total HTTP latency.","Память оценивается по":"Memory is assessed using","микробенчмарков: это выделенные байты и число выделений на операцию, а не размер живой кучи или RSS. Глобальные счётчики runtime под конкурентной HTTP-нагрузкой для оценки памяти не используются.":"from microbenchmarks: these measure bytes allocated and allocations per operation, rather than live heap size or RSS. Global runtime counters under concurrent HTTP load are not used to assess memory.","Условия микробенчмарков":"Microbenchmark conditions","Intel Core i5-12400F, Linux amd64, суффикс тестов":"Intel Core i5-12400F, Linux amd64, benchmark suffix",". Запуск:":". Command:",". Маленькие объекты содержат 1 элемент, большие — 1000; используются строки, числа, срезы и":". Small objects contain 1 item, large objects contain 1,000; they use strings, numbers, slices, and",". Encode сериализует Response, decode заполняет новую Request на каждой итерации. Подготовка данных, HTTP и сбор метрик исключены из замера.":". Encode serializes Response; decode fills a fresh Request on each iteration. Data preparation, HTTP, and metrics collection are excluded from the measurement.","Среда запуска:":"Environment:",". Версия и параметры сохранены в":". The version and parameters are recorded in",". Настройки v1 и v2 различаются, включая порядок ключей map.":". v1 and v2 settings differ, including map key ordering.","5. Результаты encode":"5. Encode results","Линии: зелёная — прежний движок (go127-v1-nojsonv2), жёлтая — API v1 на новом движке (go127-v1), синяя — прямой API v2 (go127-v2). Каждый график ниже показывает среднее значение на успешный запрос за выбранный интервал.":"Lines: green is the legacy engine (go127-v1-nojsonv2), yellow is the v1 API on the new engine (go127-v1), and blue is the direct v2 API (go127-v2). Each chart below shows the average per successful request over the selected interval.","Добавьте изображение":"Add the image","Время encode · μs на запрос":"Encode time · μs per request","Среднее время вызова encodeJSON. На показанном интервале прежний движок занимает примерно 620–720 μs на запрос, API v1 на новом движке — 930–1060 μs, прямой v2 — 790–920 μs. Прежний движок быстрее на всём интервале; прямой v2 занимает промежуточное положение. Пики у трёх серий возникают примерно одновременно.":"Average encodeJSON call duration. Over the displayed interval, the legacy engine takes roughly 620–720 μs per request, the v1 API on the new engine takes 930–1060 μs, and direct v2 takes 790–920 μs. The legacy engine is faster throughout; direct v2 sits between the other two. Peaks in all three series occur at approximately the same time.","Сопоставьте сначала старый движок с v1 API на новом движке, затем сравните оба варианта с прямым API v2. График показывает время под HTTP-нагрузкой; таблица микробенчмарков ниже отдельно показывает время и выделения памяти.":"First compare the legacy engine with the v1 API on the new engine, then compare both with the direct v2 API. The chart shows timing under HTTP load; the microbenchmark table below separately reports timing and memory allocations.","Микробенчмарки encode":"Encode microbenchmarks","Структура":"Object size","Вариант":"Configuration","Маленькие объекты · 1 элемент":"Small objects · 1 item","Большие объекты · 1000 элементов":"Large objects · 1,000 items","Медиана пяти повторов каждого показателя, 2 секунды на случай. Меньше — лучше.":"Median of five runs for each metric, 2 seconds per case. Lower is better.","Время encode у старого движка примерно на 24% меньше, чем у прямого v2, для маленьких объектов и на 22% — для больших объектов. При этом v2 выделяет примерно на 26% и 39% меньше байтов соответственно. Прямой v2 также быстрее совместимого v1 примерно на 9% для маленьких объектов и на 8% для больших объектов. У совместимого v1 меньше выделенных байтов, чем у старого движка, но больше отдельных аллокаций. Скорость и память здесь дают разные результаты.":"The legacy engine's encode time is about 24% lower than direct v2 for small objects and 22% lower for large objects. However, v2 allocates about 26% and 39% fewer bytes, respectively. Direct v2 is also about 9% faster than the compatible v1 path for small objects and 8% faster for large objects. Compatible v1 allocates fewer bytes than the legacy engine but performs more individual allocations. Timing and memory therefore tell different stories here.","6. Результаты decode":"6. Decode results","Для decode используются те же три реализации и цветовая легенда: зелёная — прежний движок, жёлтая — API v1 на новом движке, синяя — прямой v2. На этом HTTP-запуске прямой v2 показывает меньшую длительность decode; результаты относятся к данному payload и нагрузке.":"Decode uses the same three configurations and color legend: green is the legacy engine, yellow is the v1 API on the new engine, and blue is direct v2. In this HTTP run, direct v2 has a shorter decode duration; these results apply to this payload and workload.","Время decode · мс на запрос":"Decode time · ms per request","Среднее время вызова decodeJSON. Прямой v2 занимает примерно 0,96–1,10 мс на запрос, API v1 на новом движке — 1,27–1,46 мс, прежний движок — 1,42–1,61 мс. Прямой v2 быстрее на всём показанном интервале, совместимый v1 располагается между ним и прежним движком. График показывает средние длительности операций под нагрузкой, а не перцентили HTTP-задержки.":"Average decodeJSON call duration. Direct v2 takes roughly 0.96–1.10 ms per request, the v1 API on the new engine takes 1.27–1.46 ms, and the legacy engine takes 1.42–1.61 ms. Direct v2 is faster throughout the displayed interval; compatible v1 sits between it and the legacy engine. The chart shows average operation durations under load, rather than HTTP latency percentiles.","Время под HTTP-нагрузкой и время микробенчмарка относятся к разным условиям. Выделения памяти сравниваются только по таблице ниже.":"Timing under HTTP load and microbenchmark timing represent different conditions. Memory allocations are compared only in the table below.","Микробенчмарки decode":"Decode microbenchmarks","Прямой v2 сокращает время decode относительно старого движка примерно на 43% для маленьких объектов и на 38% для больших объектов. Выделенные байты уменьшаются примерно на 39% и 11%, число аллокаций — на 59% и 46%. Относительно совместимого v1 прямой v2 сокращает время примерно на 20% для маленьких объектов и на 18% для больших объектов. Совместимый v1 также быстрее старого движка, но прямой v2 показывает лучшие значения всех трёх показателей.":"Direct v2 reduces decode time relative to the legacy engine by about 43% for small objects and 38% for large objects. Allocated bytes decrease by about 39% and 11%, and allocation counts by 59% and 46%. Compared with compatible v1, direct v2 reduces time by about 20% for small objects and 18% for large objects. Compatible v1 is also faster than the legacy engine, but direct v2 has the lowest values for all three metrics.","7. Внутри Marshal":"7. Inside Marshal","Прежний движок v1 ·":"Legacy v1 engine ·","содержит":"contains","; отражение Go-типов записывает в него результат. Перед возвратом буфер копируется в новый byte slice.":"; reflection over Go types writes the result into it. Before returning, the buffer is copied into a new byte slice.","Движок v2 ·":"v2 engine ·","получает обработчик Go-типа; буферизованный encoder управляет синтаксисом и результатом кодирования.":"selects a handler for the Go type; the buffered encoder manages the syntax and the encoded output.","Вызов":"A call to","возвращает":"returns","в обоих случаях. Для пользовательского типа интерфейс":"in both cases. For custom types, the","позволяет записывать вложенные части непосредственно в общий поток вместо создания отдельного JSON-среза.":"interface allows nested parts to be written directly into the shared stream instead of creating a separate JSON slice.","8. Внутри Unmarshal":"8. Inside Unmarshal","Комментарий исходника поясняет порядок: сначала проверить корректность JSON, чтобы не заполнить часть структуры до обнаружения синтаксической ошибки; затем декодировать.":"The source comment explains the order: validate JSON first to avoid partially filling the destination before discovering a syntax error, then decode.","получает обработчик Go-типа и читает JSON через decoder пакета":"selects a handler for the Go type and reads JSON through the decoder in","Для каждого типа v2 сохраняет обработчики чтения и записи в":"For each type, v2 caches its reading and writing handlers in",". У v1 тоже есть кэш метаданных полей структуры, поэтому разница не в том, что v1 ничего не кэширует: v2 заранее связывает функции обработки типа и его полей, а при повторных вызовах использует подготовленный обработчик.":". v1 also caches struct field metadata, so the difference is not an absence of caching in v1: v2 prepares functions for the type and its fields, then reuses the prepared handler on subsequent calls.","Кэш обработчиков · v2/arshal.go":"Handler cache · v2/arshal.go","После первого построения структура делегирует значения полей уже подготовленным функциям.":"After the initial setup, the struct delegates its field values to the prepared functions.","Повторяющиеся строки в map[string]any":"Repeated strings in map[string]any","Внутреннее состояние":"The internal state of","хранит кэш уже созданных Go-строк:":"holds a cache of Go strings that have already been created:","хранит состояние разбора JSON,":"stores JSON parsing state,","— входные байты и позицию чтения,":"stores input bytes and the read position, and","— настройки.":"stores options.","указывает на 256 ячеек с Go-строками; кэш используется при Unmarshal.":"points to 256 slots holding Go strings; the cache is used during Unmarshal.","При первом использовании кэш создаётся лениво.":"The cache is allocated lazily on first use.","выбирает ячейку по хэшу байтов: если строка совпадает, возвращает уже сохранённую; иначе создаёт новую Go-строку и заменяет содержимое ячейки. Кэшируются строки длиной от 2 до 256 байт.":"selects a slot using a hash of the bytes: if the string matches, it returns the stored string; otherwise it creates a new Go string and replaces the slot. Strings from 2 to 256 bytes long are cached.","В нашем payload значение":"In our payload, the value","повторяется в":"is repeated in",". При попадании в кэш следующие повторы используют те же байты Go-строки, сокращая копирование и аллокации. Map и slice результата создаются отдельно; коллизия хэшей может вытеснить строку из кэша.":". On a cache hit, subsequent occurrences reuse the same Go string bytes, reducing copying and allocations. Result maps and slices are allocated separately; a hash collision can evict a string from the cache.","Исходники:":"Source code:","stringCache и makeString":"stringCache and makeString","Буферизованный decoder также возвращается в пул после вызова. Это может сократить временные выделения при повторных запросах, но исходники сами по себе не доказывают вклад каждого механизма в измеренную скорость. Старый":"The buffered decoder is also returned to a pool after the call. This may reduce temporary allocations on repeated requests, but source code alone does not prove how much each mechanism contributes to the measured speed. The old","локален, а полезные map, slice и значения результата нужно создать в любом случае. В этом стенде строка":"is local, while result maps, slices, and values must still be created. In this lab, the string","повторяется, поэтому кэш строк применим; на payload без повторов эффект может быть меньше.":"is repeated, so the string cache is applicable; its effect may be smaller on payloads without repetition.","В новых пользовательских типах":"For new custom types,","может читать вложенные данные из того же потока, не получая сначала отдельный срез с полным JSON-значением.":"can read nested data from the same stream without first receiving a separate slice containing the complete JSON value.","Публичный":"The public","в конфигурации v2 делегирует в":"in the v2 configuration delegates to","— это видно в":", as shown in",". Для сравнения с прежней реализацией стенд отдельно собирает v1 без jsonv2.":". To compare it with the legacy implementation, the lab builds v1 separately without jsonv2.","9. Как jsontext записывает и читает JSON":"9. How jsontext writes and reads JSON","отвечает за грамматику JSON: порядок токенов, разделители, строки, числа и границы значений. Он не решает, что поле":"handles JSON grammar: token order, delimiters, strings, numbers, and value boundaries. It does not decide which Go struct field corresponds to","соответствует конкретному полю Go-структуры; этим занимается":"; that is the responsibility of","Запись: Encoder":"Writing: Encoder","Создаём":"Create a","над":"over an","Передаём токены по одному: начало объекта, имя поля, значение, конец объекта.":"Pass tokens one at a time: object start, field name, value, object end.","Encoder хранит состояние вложенности и проверяет, допустим ли следующий токен здесь: например, после имени поля должно идти значение.":"The encoder tracks nesting state and checks whether the next token is valid here: for example, a field name must be followed by a value.","Он формирует JSON-текст, экранирует строки и отправляет накопленные байты в writer порциями. В прямом режиме каждый верхнеуровневый JSON-текст завершается переводом строки.":"It produces JSON text, escapes strings, and sends buffered bytes to the writer in chunks. In direct mode, each top-level JSON text ends with a newline.","enc := jsontext.NewEncoder(w)\n_ = enc.WriteToken(jsontext.BeginObject)\n_ = enc.WriteToken(jsontext.String(\"name\"))\n_ = enc.WriteToken(jsontext.String(\"value\"))\n_ = enc.WriteToken(jsontext.EndObject)\n// результат: {\"name\":\"value\"} и перевод строки":"enc := jsontext.NewEncoder(w)\n_ = enc.WriteToken(jsontext.BeginObject)\n_ = enc.WriteToken(jsontext.String(\"name\"))\n_ = enc.WriteToken(jsontext.String(\"value\"))\n_ = enc.WriteToken(jsontext.EndObject)\n// output: {\"name\":\"value\"} followed by a newline","В реальном коде нужно проверять ошибку каждого вызова. Вложенный массив строится аналогично через":"In real code, check the error from every call. A nested array is built similarly using",". Вместо серии токенов можно передать готовый синтаксически целый":". Instead of a series of tokens, a complete, syntactically valid","в":"in","Чтение: Decoder":"Reading: Decoder","; вход может поступать частями.":"; input may arrive in chunks.","читает следующий токен и обновляет состояние вложенности.":"reads the next token and updates nesting state.","Decoder проверяет синтаксис по ходу чтения: кавычки, литералы, запятые, двоеточия и соответствие скобок.":"The decoder validates syntax as it reads: quotes, literals, commas, colons, and matching brackets.","Ошибки синтаксиса и чтения возвращаются вызывающему коду; конец потока обозначается":"Syntax and read errors are returned to the caller; the end of the stream is indicated by","вместо одного токена читает следующее полное JSON-значение и возвращает его как байтовый":"reads the next complete JSON value rather than a single token, returning it as a byte-based",". Поэтому для объекта целиком можно взять значение сразу, а для выборочного разбора — читать токены постепенно.":". You can therefore read an entire object at once, or read tokens incrementally for selective parsing.","Связь с v2:":"Connection to v2:","поручает семантическому обработчику Go-типа записывать значения в":"asks the semantic handler for a Go type to write values into","даёт обработчику типа читать их из":"lets the type handler read them from",". Пользовательские методы":". Custom methods","используют тот же поток, чтобы обрабатывать вложенные данные без отдельного промежуточного JSON-среза.":"use the same stream to process nested data without a separate intermediate JSON slice.","В потоковом режиме encoder и decoder используют внутренний буфер для работы с":"In streaming mode, the encoder and decoder use internal buffers when working with",". «Потоковый» означает, что API может обрабатывать токены и значения последовательно, а не то, что внутри никогда нет буферизации.":". \"Streaming\" means the API can process tokens and values sequentially, rather than that it never buffers internally.","10. Откуда берётся разница":"10. Where the difference comes from","Сопоставление материалов проекта и исходников указывает на несколько механизмов, но главный для больших входов — лишний проход по байтам в прежнем v1. Прямой v2 разбирает и проверяет JSON по мере чтения. Подготовленные обработчики типов и повторное использование строк и буферов могут дополнительно влиять на подходящих сценариях.":"Comparing the project materials and source code suggests several mechanisms; for large inputs, a key one is the extra pass over the bytes in legacy v1. Direct v2 parses and validates JSON as it reads. Prepared type handlers and reuse of strings and buffers may also contribute in suitable scenarios.","Старый движок · decode.go":"Legacy engine · decode.go","Первый проход нужен старому API, чтобы сообщить о синтаксической ошибке до изменения назначения. После проверки":"The first pass lets the old API report syntax errors before modifying the destination. After validation,","читает те же байты для заполнения значения.":"reads the same bytes to populate the value.","Прямой v2 · v2/arshal.go":"Direct v2 · v2/arshal.go","Типовой обработчик вызывает":"The type handler calls",", который проверяет структуру входа по мере чтения токенов и значений. Отдельного полного прохода перед этим нет.":", which validates input structure while reading tokens and values. There is no separate full pass beforehand.","Оговорка про v1 facade:":"v1 facade caveat:","опция":", the option","включает":"enables","перед обработчиком. Публичный":"before the handler. The public","передаёт":"passes",", поэтому сохраняет предварительную проверку. В этом стенде старый API на новом движке не получает эффект от пропуска этого прохода; это свойство прямого v2 пути.":", preserving the preliminary validation. In this lab, the old API on the new engine does not benefit from skipping that pass; this is a property of the direct v2 path.","В релизных материалах Go ускорение относится прежде всего к":"In Go's release materials, the speedup primarily concerns",". Для":". For","заявлена примерно сопоставимая скорость со старой реализацией: там нет такого же отдельного полного прохода, который можно убрать.":", performance is described as roughly comparable to the old implementation: there is no equivalent separate full pass to remove.","11. Итоги":"11. Takeaways","JSON v2 даёт отдельное пространство имён для развития API и правил без нарушения совместимости v1.":"JSON v2 provides a separate namespace for evolving the API and its rules without breaking v1 compatibility.","Пакет":"The","обрабатывает синтаксис, а":"package handles syntax, while","сопоставляет его с Go-типами.":"maps it to Go types.","Потоковые функции и пользовательские методы могут сократить промежуточные буферы и повторный разбор.":"Streaming functions and custom methods can reduce intermediate buffers and repeated parsing.","Главная мысль:":"Key point:","JSON v2 меняет и правила, и форму API, а архитектурное разделение синтаксиса и Go-типов открывает путь к потоковой обработке.":"JSON v2 changes both the rules and the shape of the API. Separating syntax from Go types opens the way to streaming processing.","Источники":"Sources","— мотивация, устройство пакетов и API.":"— motivation, package architecture, and API.","Исходники Go:":"Go source code:","Код сервисов и бенчмарков для тестирования и сравнения":"Service and benchmark code for testing and comparison","В режиме слайдов используй клавиши ← и → для перехода; Escape возвращает к статье.":"In slide mode, use ← and → to navigate; Escape returns to the article."};
+      const altTranslations = {
+        "Официальная схема разделения семантики encoding/json/v2 и синтаксиса encoding/json/jsontext": "Official diagram separating encoding/json/v2 semantics from encoding/json/jsontext syntax",
+        "Encode: длительность на запрос": "Encode: duration per request",
+        "Decode: длительность на запрос": "Decode: duration per request"
+      };
+      const body = document.body, slides = [...document.querySelectorAll("main .slide")];
+      const toggle = document.getElementById("deckToggle"), prev = document.getElementById("prev");
+      const next = document.getElementById("next"), position = document.getElementById("position");
+      const ruButton = document.getElementById("langRu"), enButton = document.getElementById("langEn");
+      const texts = [], walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement.closest("script, style")) continue;
+        const key = node.textContent.trim();
+        if (Object.prototype.hasOwnProperty.call(translations, key)) {
+          texts.push({ node, ru: node.textContent, en: node.textContent.replace(key, translations[key]) });
+        }
+      }
+      const images = [...document.querySelectorAll("img[alt]")].map(img => ({
+        img, ru: img.alt, en: altTranslations[img.alt] || img.alt
+      }));
+      let index = 0, deck = false, language = "ru";
+      function show(n) {
+        index = Math.max(0, Math.min(slides.length - 1, n));
+        slides.forEach((s, i) => s.classList.toggle("active", i === index));
+        position.textContent = deck ? (index + 1) + " / " + slides.length :
+          slides.length + (language === "en" ? " sections" : " разделов");
+        prev.hidden = next.hidden = !deck;
+      }
+      function updateControls() {
+        toggle.textContent = language === "en" ? (deck ? "Article mode" : "Slide mode") :
+          (deck ? "Режим статьи" : "Режим слайдов");
+        ruButton.setAttribute("aria-pressed", String(language === "ru"));
+        enButton.setAttribute("aria-pressed", String(language === "en"));
+        show(index);
+      }
+      function setLanguage(value) {
+        language = value === "en" ? "en" : "ru";
+        document.documentElement.lang = language;
+        texts.forEach(item => { item.node.textContent = item[language]; });
+        images.forEach(item => { item.img.alt = item[language]; });
+        updateControls();
+      }
+      function setDeck(value) {
+        deck = value;
+        body.classList.toggle("deck-mode", value);
+        updateControls();
+      }
+      ruButton.addEventListener("click", () => setLanguage("ru"));
+      enButton.addEventListener("click", () => setLanguage("en"));
+      toggle.addEventListener("click", () => setDeck(!deck));
+      prev.addEventListener("click", () => show(index - 1));
+      next.addEventListener("click", () => show(index + 1));
+      document.addEventListener("keydown", e => {
+        if (!deck || e.target.closest("input, textarea, select, [contenteditable]")) return;
+        if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); show(index + 1); }
+        if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); show(index - 1); }
+        if (e.key === "Escape") setDeck(false);
+      });
+      setLanguage(new URLSearchParams(window.location.search).get("lang") === "en" ? "en" : "ru");
+    })();
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
